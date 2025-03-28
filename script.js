@@ -3,7 +3,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 
 // Global variables
 let mergedPdfDoc = null;
-let currentPage = 1;
 let totalPages = 0;
 let pageThumbnails = [];
 
@@ -11,12 +10,6 @@ let pageThumbnails = [];
 const pdfInput = document.getElementById('pdfInput');
 const dropZone = document.getElementById('dropZone');
 const pdfList = document.getElementById('pdfList');
-const pdfPreviewArea = document.getElementById('pdfPreviewArea');
-const previewContainer = document.getElementById('previewContainer');
-const currentPageSpan = document.getElementById('currentPage');
-const totalPagesSpan = document.getElementById('totalPages');
-const prevPageBtn = document.getElementById('prevPage');
-const nextPageBtn = document.getElementById('nextPage');
 const saveChangesBtn = document.getElementById('saveChangesBtn');
 const addPdfBtn = document.getElementById('addPdfBtn');
 
@@ -24,8 +17,6 @@ const addPdfBtn = document.getElementById('addPdfBtn');
 pdfInput.addEventListener('change', handleFileSelect);
 dropZone.addEventListener('dragover', handleDragOver);
 dropZone.addEventListener('drop', handleDrop);
-prevPageBtn.addEventListener('click', () => navigatePage(-1));
-nextPageBtn.addEventListener('click', () => navigatePage(1));
 saveChangesBtn.addEventListener('click', saveReorganizedPDF);
 addPdfBtn.addEventListener('click', () => pdfInput.click());
 
@@ -96,20 +87,11 @@ async function loadPDF(file) {
             totalPages = mergedPdfDoc.numPages;
         }
         
-        currentPage = 1;
-        
-        // Update UI
-        totalPagesSpan.textContent = totalPages;
-        currentPageSpan.textContent = currentPage;
-        
         // Show PDF controls
         document.querySelector('.pdf-controls').style.display = 'flex';
         
         // Generate thumbnails for all pages
         await generateThumbnails();
-        
-        // Show first page
-        await showPage(currentPage);
         
         // Enable save button
         saveChangesBtn.disabled = false;
@@ -243,44 +225,6 @@ function updatePageNumbers() {
     });
 }
 
-// Show specific page
-async function showPage(pageNumber) {
-    try {
-        const page = await mergedPdfDoc.getPage(pageNumber);
-        const viewport = page.getViewport({ scale: 1.5 });
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        
-        await page.render({
-            canvasContext: context,
-            viewport: viewport
-        }).promise;
-        
-        pdfPreviewArea.innerHTML = '';
-        pdfPreviewArea.appendChild(canvas);
-        
-        // Update navigation buttons
-        prevPageBtn.disabled = pageNumber <= 1;
-        nextPageBtn.disabled = pageNumber >= totalPages;
-    } catch (error) {
-        console.error('Error showing page:', error);
-        alert('Error showing page. Please try again.');
-    }
-}
-
-// Navigate between pages
-function navigatePage(delta) {
-    const newPage = currentPage + delta;
-    if (newPage >= 1 && newPage <= totalPages) {
-        currentPage = newPage;
-        currentPageSpan.textContent = currentPage;
-        showPage(currentPage);
-    }
-}
-
 // Save reorganized PDF
 async function saveReorganizedPDF() {
     try {
@@ -295,20 +239,18 @@ async function saveReorganizedPDF() {
         
         // Create a new PDF document
         const pdfBytes = await mergedPdfDoc.getData();
-        const pdfDocLib = await PDFLib.PDFDocument.load(pdfBytes);
-        
-        // Create a new document for the reordered pages
-        const reorderedPdf = await PDFLib.PDFDocument.create();
+        const sourcePdf = await PDFLib.PDFDocument.load(pdfBytes);
+        const newPdf = await PDFLib.PDFDocument.create();
         
         // Copy pages in the new order
         for (const pageNum of newPageOrder) {
             // Convert to 0-based index for PDF-lib
-            const [copiedPage] = await reorderedPdf.copyPages(pdfDocLib, [pageNum - 1]);
-            reorderedPdf.addPage(copiedPage);
+            const [copiedPage] = await newPdf.copyPages(sourcePdf, [pageNum - 1]);
+            newPdf.addPage(copiedPage);
         }
         
         // Save the modified PDF
-        const modifiedPdfBytes = await reorderedPdf.save();
+        const modifiedPdfBytes = await newPdf.save();
         const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         
