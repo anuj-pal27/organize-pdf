@@ -5,6 +5,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs
 let mergedPdfDoc = null;
 let totalPages = 0;
 let pageThumbnails = [];
+let autoSaveTimeout = null;
+let lastSavedOrder = null;
 
 // DOM Elements
 const pdfInput = document.getElementById('pdfInput');
@@ -12,6 +14,9 @@ const dropZone = document.getElementById('dropZone');
 const pdfList = document.getElementById('pdfList');
 const saveChangesBtn = document.getElementById('saveChangesBtn');
 const addPdfBtn = document.getElementById('addPdfBtn');
+const autoSaveStatus = document.createElement('div');
+autoSaveStatus.className = 'auto-save-status';
+document.querySelector('.pdf-controls').appendChild(autoSaveStatus);
 
 // Event Listeners
 pdfInput.addEventListener('change', handleFileSelect);
@@ -208,6 +213,9 @@ function setupDragAndDrop(container) {
 
             // Update page numbers after moving
             updatePageNumbers();
+            
+            // Trigger auto-save
+            triggerAutoSave();
         }
     });
 }
@@ -223,6 +231,83 @@ function updatePageNumbers() {
         thumb.dataset.currentPosition = index + 1;
         thumb.querySelector('.page-number').textContent = `Page ${index + 1}`;
     });
+}
+
+// Trigger auto-save with debounce
+function triggerAutoSave() {
+    // Clear existing timeout
+    if (autoSaveTimeout) {
+        clearTimeout(autoSaveTimeout);
+    }
+
+    // Show saving status
+    autoSaveStatus.textContent = 'Saving changes...';
+    autoSaveStatus.classList.add('saving');
+
+    // Set new timeout
+    autoSaveTimeout = setTimeout(async () => {
+        try {
+            await autoSavePDF();
+            autoSaveStatus.textContent = 'Changes saved';
+            autoSaveStatus.classList.remove('saving');
+            autoSaveStatus.classList.add('saved');
+            
+            // Clear saved status after 2 seconds
+            setTimeout(() => {
+                autoSaveStatus.classList.remove('saved');
+                autoSaveStatus.textContent = '';
+            }, 2000);
+        } catch (error) {
+            console.error('Auto-save failed:', error);
+            autoSaveStatus.textContent = 'Auto-save failed';
+            autoSaveStatus.classList.remove('saving');
+            autoSaveStatus.classList.add('error');
+        }
+    }, 1000); // Wait 1 second after last change before saving
+}
+
+// Auto-save PDF
+async function autoSavePDF() {
+    try {
+        // Get the current order of thumbnails
+        const thumbnails = document.querySelectorAll('.page-thumbnail');
+        const currentOrder = Array.from(thumbnails).map(thumb => 
+            parseInt(thumb.dataset.originalPageNumber)
+        );
+
+        // Check if order has changed
+        if (JSON.stringify(currentOrder) === JSON.stringify(lastSavedOrder)) {
+            return; // No changes to save
+        }
+
+        // Create a new PDF document
+        const pdfBytes = await mergedPdfDoc.getData();
+        const sourcePdf = await PDFLib.PDFDocument.load(pdfBytes);
+        const newPdf = await PDFLib.PDFDocument.create();
+        
+        // Copy pages in the new order
+        for (const pageNum of currentOrder) {
+            const [copiedPage] = await newPdf.copyPages(sourcePdf, [pageNum - 1]);
+            newPdf.addPage(copiedPage);
+        }
+        
+        // Save the modified PDF
+        const modifiedPdfBytes = await newPdf.save();
+        const blob = new Blob([modifiedPdfBytes], { type: 'application/pdf' });
+        
+        // Update the merged document
+        mergedPdfDoc = await pdfjsLib.getDocument(modifiedPdfBytes).promise;
+        
+        // Update last saved order
+        lastSavedOrder = currentOrder;
+        
+        // Store in localStorage for recovery
+        localStorage.setItem('lastSavedPDF', URL.createObjectURL(blob));
+        
+    } catch (error) {
+        console.error('Error in auto-save:', error);
+        throw error;
+    }
 }
 
 // Save reorganized PDF
